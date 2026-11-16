@@ -8,6 +8,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -27,7 +28,18 @@ internal static class Program
         view.TopLevel = false;
         view.Dock = DockStyle.Fill;
         window.Controls.Add(view);
-        window.Shown += (_, _) => view.Show();
+        window.Shown += (_, _) =>
+        {
+            view.Show();
+            if (!args.Contains("--unlayered-preview"))
+            {
+                // Match production: the handle exists before desktop layering is enabled.
+                view.UseLayeredDesktopRendering = true;
+                var extended = (long)NativeMethods.GetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle);
+                NativeMethods.SetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle, (nint)(extended | NativeMethods.WsExLayered));
+                view.RefreshShape();
+            }
+        };
         view.ContextMenuStrip = ModernMenu.Create();
         view.ContextMenuStrip.Items.Add("Сохранить / разрешить конфликт…", null, (_, _) => session.ResolveOrRetry());
         view.ContextMenuStrip.Items.Add("Изменить заголовок…", null, (_, _) => view.BeginTitleEditing());

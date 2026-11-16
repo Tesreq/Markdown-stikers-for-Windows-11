@@ -8,6 +8,7 @@ internal static class WindowLifecycleChecks
     internal static void Run(string root, Action<bool, string> check)
     {
         CheckNewStickers(Path.Combine(root, "new-stickers"), check);
+        CheckLayeredPreview(check);
         var paths = new AppPaths(root);
         var file = Path.Combine(paths.Notes, "Закрываемая заметка.md");
         File.WriteAllText(file, "Первый текст");
@@ -73,6 +74,29 @@ internal static class WindowLifecycleChecks
         }
     }
 
+    private static void CheckLayeredPreview(Action<bool, string> check)
+    {
+        using var host = new Form { ClientSize = new Size(340, 390), BackColor = Color.FromArgb(30, 36, 45) };
+        using var view = new StickyNoteView(new NoteRecord { Title = "Проверка прозрачности" }) { TopLevel = false, Dock = DockStyle.Fill };
+        host.Controls.Add(view);
+        host.Show();
+        view.Show();
+        view.UseLayeredDesktopRendering = true;
+        var extended = (long)NativeMethods.GetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle);
+        NativeMethods.SetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle, (nint)(extended | NativeMethods.WsExLayered));
+        view.RefreshShape();
+        Application.DoEvents();
+        check(HasTransparentCornerPixels(view), "The standalone visual harness enables child-window transparency without a runtime exception");
+        NativeMethods.SetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle, (nint)(extended & ~NativeMethods.WsExLayered));
+        view.RefreshShape();
+        check(view.BackColor != StickyNoteView.CornerTransparencyColor && view.Region is not null,
+            "A temporary layering failure keeps an opaque paper background without a key-colored frame or exception");
+        NativeMethods.SetWindowLongPtr(view.Handle, NativeMethods.GwlExStyle, (nint)(extended | NativeMethods.WsExLayered));
+        view.RefreshShape();
+        Application.DoEvents();
+        check(HasTransparentCornerPixels(view), "Transparent corners recover when native layering becomes available again");
+    }
+
     private static void CheckNewStickers(string root, Action<bool, string> check)
     {
         var paths = new AppPaths(root);
@@ -97,8 +121,20 @@ internal static class WindowLifecycleChecks
                 .Where(view => view.ContextMenuStrip is not null && view.Text == "StickyDesk — Заметка").ToArray();
             check(manager.Count == index + 1 && views.Count(HasRoundedRegion) == index + 1,
                 $"New sticker {index + 1} and its predecessors retain rounded clipping after editor focus");
+            check(views.All(view => !view.UseLayeredDesktopRendering || HasTransparentCornerPixels(view)),
+                $"New sticker {index + 1} has actual transparent corner pixels and opaque paper in the layered compositor");
         }
         var stickers = Application.OpenForms.OfType<StickyNoteView>().Where(view => view.TitleText == "Заметка").ToArray();
+        var colorsPreserveCorners = true;
+        foreach (var color in new[] { "#FFF2B3", "#DDF2C2", "#D9EEFA", "#F8DCE8", "#F5F5F5" })
+        {
+            foreach (var sticker in stickers) sticker.ApplyColor(color);
+            colorsPreserveCorners &= stickers.All(HasRoundedRegion);
+        }
+        check(colorsPreserveCorners, "All five paper colors preserve real transparent corners");
+        foreach (var sticker in stickers) sticker.Size = new Size(180, 120);
+        Application.DoEvents();
+        check(stickers.All(HasRoundedRegion), "Transparent corners survive resizing down to the minimum sticker size");
         foreach (var sticker in stickers) SetWindowRgn(sticker.Handle, 0, false);
         Application.DoEvents();
         check(stickers.All(HasRoundedRegion), "Every sticker repairs native clipping reset without resizing or manual desktop reattachment");
@@ -111,6 +147,7 @@ internal static class WindowLifecycleChecks
     private static bool HasRoundedRegion(StickyNoteView view)
     {
         if (view.IsDisposed || !view.IsHandleCreated) return false;
+        if (view.UseLayeredDesktopRendering) return HasTransparentCornerPixels(view);
         var region = CreateRectRgn(0, 0, 0, 0);
         try
         {
@@ -122,6 +159,22 @@ internal static class WindowLifecycleChecks
                 && PtInRegion(region, width / 2, height / 2);
         }
         finally { DeleteObject(region); }
+    }
+
+    private static bool HasTransparentCornerPixels(StickyNoteView view)
+    {
+        if (!NativeMethods.GetLayeredWindowAttributes(view.Handle, out var key, out var alpha, out var flags)
+            || key != (uint)ColorTranslator.ToWin32(StickyNoteView.CornerTransparencyColor) || alpha != 255 || flags != 3) return false;
+        using var bitmap = new Bitmap(view.ClientSize.Width, view.ClientSize.Height);
+        view.DrawToBitmap(bitmap, view.ClientRectangle);
+        var transparent = StickyNoteView.CornerTransparencyColor.ToArgb();
+        var width = bitmap.Width;
+        var height = bitmap.Height;
+        return bitmap.GetPixel(1, 1).ToArgb() == transparent && bitmap.GetPixel(width - 2, 1).ToArgb() == transparent
+            && bitmap.GetPixel(1, height - 2).ToArgb() == transparent && bitmap.GetPixel(width - 2, height - 2).ToArgb() == transparent
+            && bitmap.GetPixel(width / 2, 1).ToArgb() != transparent && bitmap.GetPixel(width / 2, height - 2).ToArgb() != transparent
+            && bitmap.GetPixel(1, height / 2).ToArgb() != transparent && bitmap.GetPixel(width - 2, height / 2).ToArgb() != transparent
+            && bitmap.GetPixel(width / 2, height / 2).ToArgb() != transparent;
     }
 
     [DllImport("user32.dll")] private static extern int GetWindowRgn(nint window, nint region);

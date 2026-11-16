@@ -55,12 +55,14 @@ object Describe(nint window)
         var parentStyle = (long)Native.GetWindowLongPtr(parent, -20);
         var extended = (long)Native.GetWindowLongPtr(window, -20);
         var layeredRequired = (parentStyle & 0x200000) != 0;
-        var hasAttributes = Native.GetLayeredWindowAttributes(window, out _, out var alpha, out var flags);
+        var hasAttributes = Native.GetLayeredWindowAttributes(window, out var colorKey, out var alpha, out var flags);
         var renderable = !layeredRequired || ((extended & 0x80000) != 0 && hasAttributes && alpha == 255 && (flags & 2) != 0);
-        var rounded = HasRoundedCorners(window, bounds);
+        var keyedCorners = hasAttributes && (flags & 1) != 0 && colorKey == 0x00FF00FF;
+        var rounded = HasRoundedCorners(window, bounds) || keyedCorners;
         if (!renderable || !rounded) invalidNotes++;
         notes.Add(new { Handle = $"0x{window:X}", ParentClass = Native.ClassName(parent), LayeredRequired = layeredRequired,
             HasLayeredStyle = (extended & 0x80000) != 0, Alpha = alpha, RenderContractSatisfied = renderable, RoundedCorners = rounded,
+            ColorKeyCorners = keyedCorners,
             ChildWindow = ((long)Native.GetWindowLongPtr(window, -16) & 0x40000000) != 0,
             ToolWindow = (extended & 0x80) != 0, TopMost = (extended & 8) != 0, Visible = Native.IsWindowVisible(window) });
     }

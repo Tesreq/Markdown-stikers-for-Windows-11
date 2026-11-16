@@ -63,7 +63,7 @@ internal sealed class DesktopIntegration : IDisposable
         var previous = NativeMethods.SetParent(handle, Host);
         if (previous == 0 && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
         if (NativeMethods.GetParent(handle) != Host) throw new InvalidOperationException("Windows не удалось прикрепить стикер к рабочему столу.");
-        if (RequiresLayeredRendering && !NativeMethods.SetLayeredWindowAttributes(handle, 0, 255, 2))
+        if (RequiresLayeredRendering && !view.EnsureDesktopTransparency())
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Не удалось включить отрисовку стикера на рабочем столе Windows 11.");
         Position(view, screenBounds);
     }

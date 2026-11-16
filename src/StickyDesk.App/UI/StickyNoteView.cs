@@ -4,6 +4,7 @@ namespace StickyDesk;
 
 internal sealed class StickyNoteView : Form
 {
+    internal static readonly Color CornerTransparencyColor = Color.Magenta;
     private readonly Label _title;
     private readonly TextBox _titleEditor;
     private readonly Panel _titleSeparator;
@@ -62,17 +63,18 @@ internal sealed class StickyNoteView : Form
         MinimumSize = new Size(180, 120);
         Size = new Size(note.Width, note.Height);
         Font = new Font("Segoe UI", 10);
-        Padding = new Padding(1);
+        // Keep native child controls away from the corner pixels used by the compositor's color key.
+        Padding = new Padding(1, 12, 1, 12);
         DoubleBuffered = true;
 
-        _header = new Panel { Dock = DockStyle.Top, Height = 34, Cursor = Cursors.SizeAll, Padding = new Padding(16, 3, 10, 3) };
+        _header = new Panel { Dock = DockStyle.Top, Height = 23, Cursor = Cursors.SizeAll, Padding = new Padding(16, 3, 10, 3) };
         _header.Paint += (_, e) =>
         {
             var scale = DeviceDpi / 96f;
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var accent = new Pen(_theme.Accent, 3 * scale)
             { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
-            e.Graphics.DrawLine(accent, 16 * scale, 17 * scale, 39 * scale, 17 * scale);
+            e.Graphics.DrawLine(accent, 16 * scale, 11.5f * scale, 39 * scale, 11.5f * scale);
         };
         var titleSection = new Panel { Dock = DockStyle.Top, Height = 44 };
         var titleHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 0, 9) };
@@ -89,7 +91,7 @@ internal sealed class StickyNoteView : Form
         titleSection.Controls.Add(titleHost);
         titleSection.Controls.Add(_titleSeparator);
         _header.Controls.Add(_menuButton);
-        _footer = new Panel { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(16, 4, 8, 10) };
+        _footer = new Panel { Dock = DockStyle.Bottom, Height = 31, Padding = new Padding(16, 4, 8, 0) };
         _status = new NoteStatus { Dock = DockStyle.Fill, ForeColor = NoteTheme.Muted, AutoEllipsis = true, Text = "Сохранено", Cursor = Cursors.Default };
         _modeButton = new NoteActionButton { Dock = DockStyle.Right, Width = 88, Text = "Править", Glyph = NoteGlyph.Edit,
             Filled = true, AccessibleName = "Редактировать Markdown" };
@@ -141,7 +143,7 @@ internal sealed class StickyNoteView : Form
             else if (e.KeyCode == Keys.Escape) { CancelTitleEditing(); e.SuppressKeyPress = true; }
         };
         _status.Click += (_, _) => StatusClicked?.Invoke();
-        foreach (var control in new Control[] { _header })
+        foreach (var control in new Control[] { _header, this })
         {
             control.MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) StartDrag(control, false); };
             control.MouseMove += (_, _) => UpdateDrag();
@@ -164,10 +166,16 @@ internal sealed class StickyNoteView : Form
         };
         Paint += (_, e) =>
         {
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var path = NoteTheme.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), 12 * DeviceDpi / 96f);
+            var state = e.Graphics.Save();
+            // Clip before filling so edge antialiasing never blends the transparency key into the paper.
+            e.Graphics.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using var paper = new SolidBrush(_theme.Surface);
+            e.Graphics.FillRectangle(paper, ClientRectangle);
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var pen = new Pen(_theme.Border);
             e.Graphics.DrawPath(pen, path);
+            e.Graphics.Restore(state);
         };
     }
 
@@ -292,10 +300,11 @@ internal sealed class StickyNoteView : Form
     public void ApplyColor(string hex)
     {
         _theme = NoteTheme.From(hex);
-        BackColor = _theme.Surface;
+        BackColor = CornerTransparencyColor;
         foreach (Control control in Controls) SetBackground(control, _theme.Surface);
         _titleSeparator.BackColor = _theme.Divider;
         _menuButton.Accent = _modeButton.Accent = _grip.Accent = _theme.Accent;
+        RefreshShape();
         Invalidate(true);
     }
 
@@ -369,10 +378,26 @@ internal sealed class StickyNoteView : Form
         {
             using var path = NoteTheme.Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), 12 * DeviceDpi / 96f);
             var previous = Region;
-            Region = new Region(path);
+            // Raised Windows 11 desktops can compose the whole layered rectangle despite a correct HRGN.
+            // Paint real keyed corner pixels instead; an HRGN would prevent those pixels from repainting.
+            var keyed = UseLayeredDesktopRendering && EnsureDesktopTransparency();
+            BackColor = keyed ? CornerTransparencyColor : _theme.Surface;
+            Region = keyed ? null : new Region(path);
             previous?.Dispose();
+            Invalidate(true);
         }
         finally { _refreshingShape = false; }
+    }
+
+    internal bool EnsureDesktopTransparency()
+    {
+        if (!UseLayeredDesktopRendering || !IsHandleCreated) return false;
+        var key = (uint)ColorTranslator.ToWin32(CornerTransparencyColor);
+        if (NativeMethods.GetLayeredWindowAttributes(Handle, out var currentKey, out var alpha, out var flags)
+            && currentKey == key && alpha == 255 && flags == 3) return true;
+        // Cosmetic updates also run during native style transitions. Fall back to a solid,
+        // clipped surface until layering is ready; never expose the key color or throw in WndProc.
+        return NativeMethods.SetLayeredWindowAttributes(Handle, key, 255, 3);
     }
 
     protected override void WndProc(ref Message message)
