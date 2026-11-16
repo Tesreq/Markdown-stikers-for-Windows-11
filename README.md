@@ -4,9 +4,11 @@ Markdown-стикеры для рабочего стола Windows 11. C# · .NE
 
 ## Запуск
 
-Установщик в корне проекта: **[StickyDesk-Setup-0.3.4-x64.exe](StickyDesk-Setup-0.3.4-x64.exe)**.
+**[Скачать установщик 0.3.4 для Windows 11 x64](https://github.com/Tesreq/Markdown-stikers-for-Windows-11/releases/download/v0.3.4/StickyDesk-Setup-0.3.4-x64.exe)**.
 
-Запуск без установки: **[StickyDesk.exe](StickyDesk.exe)** в корне проекта. Используется тот же каталог заметок, установленный .NET не требуется. При переносе EXE сохраните рядом `THIRD_PARTY_NOTICES.txt`.
+**[Скачать переносную версию 0.3.4 (ZIP)](https://github.com/Tesreq/Markdown-stikers-for-Windows-11/releases/download/v0.3.4/StickyDesk-Portable-0.3.4-x64.zip)** — распакуйте архив и запустите `StickyDesk.exe`. Установленный .NET не требуется. При переносе EXE сохраните рядом включённый в архив `THIRD_PARTY_NOTICES.txt`.
+
+Оба варианта используют один каталог заметок. Все сборки доступны в [релизах](https://github.com/Tesreq/Markdown-stikers-for-Windows-11/releases). После локальной сборки готовые `StickyDesk.exe` и установщик можно хранить в корне проекта.
 
 [Установка и удаление](docs/INSTALLATION.md)
 
@@ -59,4 +61,4 @@ StickyDesk-Setup-*.exe     актуальный самостоятельный �
 
 Версия приложения — **0.3.4**. Запись защищена от одновременной перезаписи другим процессом; незавершённые сохранения и переименования имеют журнал восстановления. Для разбора Markdown используется Markdig 1.6.0; браузерного движка нет. Лицензия зависимости: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
-Исходники сохранены в локальном Git-репозитории. Пользовательские заметки, резервные копии, кэши и готовый установщик в историю не входят. Удалённый репозиторий не настроен.
+Исходники и история изменений: [Tesreq/Markdown-stikers-for-Windows-11](https://github.com/Tesreq/Markdown-stikers-for-Windows-11). Пользовательские заметки, резервные копии, кэши и готовые сборки в историю не входят; дистрибутивы размещаются в релизах.
