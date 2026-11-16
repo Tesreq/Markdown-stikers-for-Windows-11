@@ -5,6 +5,7 @@
 .local/
 artifacts/
 /StickyDesk-Setup-*.exe
+/StickyDesk.exe
 TestResults/
 *.log
 *.user
