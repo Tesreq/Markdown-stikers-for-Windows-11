@@ -7,4 +7,9 @@
     <Deterministic>true</Deterministic>
     <RestorePackagesPath>$(MSBuildThisFileDirectory).local/nuget/packages</RestorePackagesPath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
 </Project>

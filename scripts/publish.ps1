@@ -21,4 +21,5 @@ if (!$FrameworkDependent) { $properties += @('-p:PublishSingleFile=true', '-p:In
 Restore-Project -ProjectPath $project -Offline:$Offline -AdditionalArguments $properties
 $publishArguments = @('publish', $project, '-c', 'Release', '--no-restore', '--nologo', '-o', $output) + $properties
 Invoke-ProjectDotnet -Arguments $publishArguments
+& "$PSScriptRoot\verify-release-privacy.ps1" -ExecutablePath $existingExecutable
 Write-Host "Готово: $output\StickyDesk.exe"
