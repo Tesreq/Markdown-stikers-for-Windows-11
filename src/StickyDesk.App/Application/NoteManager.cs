@@ -9,6 +9,7 @@ internal sealed class NoteManager : ApplicationContext
     private readonly AppPaths _paths;
     private readonly ConfigurationService _configurationService;
     private readonly AppConfiguration _configuration;
+    private readonly Action<string> _openDirectory;
     private readonly bool _firstRun;
     private readonly MarkdownFileService _files = new();
     private readonly List<NoteSession> _notes = [];
@@ -27,10 +28,16 @@ internal sealed class NoteManager : ApplicationContext
     public bool Hidden => _hidden;
     public bool DesktopAvailable => _desktop.Available;
     public string DataDirectory => _paths.Root;
+    internal ContextMenuStrip TrayMenu => _tray.Menu;
+    internal IReadOnlyList<NoteRecord> RecentNotes => _configuration.Notes
+        .Select((note, index) => (note, index))
+        .OrderByDescending(item => item.note.LastOpenedUtc ?? DateTimeOffset.MinValue)
+        .ThenByDescending(item => item.index).Take(3).Select(item => item.note).ToArray();
 
-    public NoteManager(AppPaths paths)
+    public NoteManager(AppPaths paths, Action<string>? openDirectory = null)
     {
         _paths = paths;
+        _openDirectory = openDirectory ?? (directory => Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true }));
         _firstRun = !File.Exists(paths.Config) && !File.Exists(paths.Config + ".bak");
         _configurationService = new(paths);
         _configuration = _configurationService.Load();
@@ -67,7 +74,7 @@ internal sealed class NoteManager : ApplicationContext
         try
         {
             if (_hidden) ToggleVisibility();
-            var record = new NoteRecord { IsOwned = true };
+            var record = new NoteRecord { IsOwned = true, LastOpenedUtc = DateTimeOffset.UtcNow };
             record.FilePath = Path.Combine("notes", $"note-{DateTime.Now:yyyyMMdd-HHmmss}-{record.Id[..6]}.md");
             var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
             record.X = screen.Left + 72 + _notes.Count % 6 * 28;
@@ -87,7 +94,8 @@ internal sealed class NoteManager : ApplicationContext
 
     public void OpenMarkdown()
     {
-        using var dialog = new OpenFileDialog { Title = "Открыть Markdown-файл", Filter = "Markdown (*.md)|*.md", CheckFileExists = true, RestoreDirectory = true };
+        using var dialog = new OpenFileDialog { Title = "Открыть Markdown-файл", Filter = "Markdown (*.md)|*.md", CheckFileExists = true,
+            InitialDirectory = _paths.Notes, RestoreDirectory = true };
         if (dialog.ShowDialog() != DialogResult.OK) return;
         OpenFile(dialog.FileName);
     }
@@ -97,7 +105,8 @@ internal sealed class NoteManager : ApplicationContext
         var existing = FindFile(path);
         if (existing is not null)
         {
-            MessageBox.Show("Этот файл уже открыт в стикере. Вторую редактируемую копию создавать не будем.", "StickyDesk", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            existing.Record.LastOpenedUtc = DateTimeOffset.UtcNow;
+            SaveConfiguration();
             if (_hidden) ToggleVisibility();
             existing.View.FocusEditor();
             return;
@@ -115,6 +124,7 @@ internal sealed class NoteManager : ApplicationContext
                 _configuration.Notes.Add(record);
             }
             record.IsClosed = false;
+            record.LastOpenedUtc = DateTimeOffset.UtcNow;
             AddSession(record);
             SaveConfiguration();
         }
@@ -122,6 +132,23 @@ internal sealed class NoteManager : ApplicationContext
         {
             MessageBox.Show($"Не удалось открыть файл как UTF-8 Markdown.\n\n{ex.Message}", "StickyDesk", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    internal void OpenRecentNote(string id)
+    {
+        var record = _configuration.Notes.FirstOrDefault(note => note.Id == id);
+        if (record is null) return;
+        if (_hidden) ToggleVisibility();
+        var session = _notes.FirstOrDefault(note => note.Record.Id == id);
+        if (session is null)
+        {
+            // A missing file can still have a recoverable sticker. Keep its original identity.
+            session = AddSession(record);
+            record.IsClosed = false;
+        }
+        record.LastOpenedUtc = DateTimeOffset.UtcNow;
+        SaveConfiguration();
+        if (_desktop.Available) session.View.FocusEditor();
     }
 
     private NoteSession AddSession(NoteRecord record)
@@ -173,7 +200,7 @@ internal sealed class NoteManager : ApplicationContext
         menu.Items.Add("Открыть папку", null, (_, _) => OpenNoteFolder(session.FilePath));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Закрыть заметку", null, (_, _) => CloseNote(session.Record.Id));
-        menu.Items.Add("Удалить заметку…", null, (_, _) => Delete(session)).ForeColor = Color.Firebrick;
+        menu.Items.Add("Удалить заметку", null, (_, _) => Delete(session)).ForeColor = Color.Firebrick;
         return menu;
     }
 
@@ -206,12 +233,6 @@ internal sealed class NoteManager : ApplicationContext
     private void Delete(NoteSession session)
     {
         session.View.CommitTitleEditing();
-        var description = session.IsFileMissing
-            ? "Файл уже отсутствует. Стикер будет убран с рабочего стола."
-            : "Стикер будет убран с рабочего стола, а Markdown-файл — перемещён в Корзину.";
-        var answer = MessageBox.Show($"Удалить заметку «{session.View.TitleText}»?\n\n{description}\nКопия текущего текста сохранится для восстановления.\n\n{session.FilePath}",
-            "StickyDesk — удаление заметки", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-        if (answer != DialogResult.Yes) return;
         try
         {
             if (session.RecycleFile()) Detach(session);
@@ -340,17 +361,17 @@ internal sealed class NoteManager : ApplicationContext
         ExitThread();
     }
 
-    public void OpenDataDirectory() => Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_paths.Root}\"") { UseShellExecute = true });
-    private static void OpenNoteFolder(string filePath)
+    public void OpenNotesDirectory() => OpenFolder(_paths.Notes);
+    private void OpenNoteFolder(string filePath) => OpenFolder(Path.GetDirectoryName(filePath));
+    private void OpenFolder(string? directory)
     {
-        var directory = Path.GetDirectoryName(filePath);
         if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
         {
             MessageBox.Show("Папка этой заметки недоступна. Возможно, она была перемещена или удалена.",
                 "StickyDesk — папка заметки", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        try { Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true }); }
+        try { _openDirectory(directory); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
             MessageBox.Show($"Не удалось открыть папку заметки.\n\n{ex.Message}",

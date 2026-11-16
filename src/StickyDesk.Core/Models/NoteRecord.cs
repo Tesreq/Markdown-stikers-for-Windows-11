@@ -7,6 +7,7 @@ public sealed class NoteRecord
     public string FilePath { get; set; } = "";
     public bool IsOwned { get; set; }
     public bool IsClosed { get; set; }
+    public DateTimeOffset? LastOpenedUtc { get; set; }
     // Screen coordinates are physical pixels; size is in 96-DPI logical pixels.
     public int X { get; set; } = 120;
     public int Y { get; set; } = 120;

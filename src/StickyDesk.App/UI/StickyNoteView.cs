@@ -25,6 +25,8 @@ internal sealed class StickyNoteView : Form
     private bool _resizing;
     private bool _loading;
     private bool _isEditingTitle;
+    private bool _refreshingShape;
+    private bool _shapeRefreshQueued;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal bool UseLayeredDesktopRendering { get; set; }
     public event Action? TextEdited;
@@ -317,6 +319,7 @@ internal sealed class StickyNoteView : Form
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        _shapeRefreshQueued = false;
         base.OnHandleDestroyed(e);
         if (!Disposing && !IsDisposed && !RecreatingHandle) ShellHandleLost?.Invoke();
     }
@@ -360,11 +363,35 @@ internal sealed class StickyNoteView : Form
 
     internal void RefreshShape()
     {
-        if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
-        using var path = NoteTheme.Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), 12 * DeviceDpi / 96f);
-        var previous = Region;
-        Region = new Region(path);
-        previous?.Dispose();
+        if (_refreshingShape || Disposing || IsDisposed || ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+        _refreshingShape = true;
+        try
+        {
+            using var path = NoteTheme.Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), 12 * DeviceDpi / 96f);
+            var previous = Region;
+            Region = new Region(path);
+            previous?.Dispose();
+        }
+        finally { _refreshingShape = false; }
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        base.WndProc(ref message);
+        // Native style, focus and menu transitions can reset clipping after Show/Position.
+        // Reapply after the whole transition, including on every subsequently created sticker.
+        if (message.Msg is 0x0047 or 0x007D or 0x0086 or 0x0018) QueueShapeRefresh();
+    }
+
+    private void QueueShapeRefresh()
+    {
+        if (_refreshingShape || _shapeRefreshQueued || !IsHandleCreated || Disposing || IsDisposed) return;
+        _shapeRefreshQueued = true;
+        BeginInvoke(() =>
+        {
+            _shapeRefreshQueued = false;
+            if (IsHandleCreated && !Disposing && !IsDisposed) RefreshShape();
+        });
     }
 
     private void StartDrag(Control sender, bool resize)

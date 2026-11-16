@@ -7,6 +7,7 @@ internal static class WindowLifecycleChecks
 {
     internal static void Run(string root, Action<bool, string> check)
     {
+        CheckNewStickers(Path.Combine(root, "new-stickers"), check);
         var paths = new AppPaths(root);
         var file = Path.Combine(paths.Notes, "Закрываемая заметка.md");
         File.WriteAllText(file, "Первый текст");
@@ -70,6 +71,41 @@ internal static class WindowLifecycleChecks
             check(manager.CloseNote(record.Id, false) && File.ReadAllText(file) == "Последнее изменение",
                 "Closing succeeds once recovery storage becomes writable again");
         }
+    }
+
+    private static void CheckNewStickers(string root, Action<bool, string> check)
+    {
+        var paths = new AppPaths(root);
+        new ConfigurationService(paths).Save(new AppConfiguration());
+        using var manager = new NoteManager(paths);
+        Application.DoEvents();
+        for (var index = 0; index < 3; index++)
+        {
+            if (index == 0) manager.CreateNote();
+            else
+            {
+                var menu = index == 1
+                    ? Application.OpenForms.OfType<StickyNoteView>().Single(view => view.TitleText == "Заметка").ContextMenuStrip!
+                    : manager.TrayMenu;
+                menu.Show(new Point(30, 30));
+                Application.DoEvents();
+                menu.Items.Cast<ToolStripItem>().Single(item => item.Text == "Создать стикер").PerformClick();
+                menu.Close();
+            }
+            Application.DoEvents();
+            var views = Application.OpenForms.OfType<StickyNoteView>()
+                .Where(view => view.ContextMenuStrip is not null && view.Text == "StickyDesk — Заметка").ToArray();
+            check(manager.Count == index + 1 && views.Count(HasRoundedRegion) == index + 1,
+                $"New sticker {index + 1} and its predecessors retain rounded clipping after editor focus");
+        }
+        var stickers = Application.OpenForms.OfType<StickyNoteView>().Where(view => view.TitleText == "Заметка").ToArray();
+        foreach (var sticker in stickers) SetWindowRgn(sticker.Handle, 0, false);
+        Application.DoEvents();
+        check(stickers.All(HasRoundedRegion), "Every sticker repairs native clipping reset without resizing or manual desktop reattachment");
+        manager.ToggleVisibility();
+        manager.ToggleVisibility();
+        Application.DoEvents();
+        check(stickers.All(view => view.Visible && HasRoundedRegion(view)), "All subsequently created stickers stay rounded after hide and show");
     }
 
     private static bool HasRoundedRegion(StickyNoteView view)

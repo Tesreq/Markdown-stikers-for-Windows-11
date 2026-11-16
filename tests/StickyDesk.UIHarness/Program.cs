@@ -167,6 +167,7 @@ internal static class Program
             RenamingSessionChecks.Run(Path.Combine(root, "renaming-scenarios"), Check);
             StorageSafetySessionChecks.Run(Path.Combine(root, "storage-safety-scenarios"), Check);
             WindowLifecycleChecks.Run(Path.Combine(root, "window-lifecycle"), Check);
+            TrayWorkflowChecks.Run(Path.Combine(root, "tray-workflows"), Check);
             File.WriteAllLines(Path.Combine(root, "ui-self-test-results.txt"), results);
             return 0;
         }
