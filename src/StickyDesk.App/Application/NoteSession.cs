@@ -74,6 +74,7 @@ internal sealed class NoteSession : IDisposable
             _snapshot = _files.Read(FilePath);
             View.SetMarkdown(_snapshot.EditorText);
         }
+        catch (InterruptedSaveException ex) { LoadInterruptedSave(ex); return; }
         catch (Exception ex) when (IsFileError(ex)) { MarkUnavailable(ex); }
         var recovery = _paths.RecoveryFile(Record.Id);
         if (!File.Exists(recovery)) return;
@@ -150,6 +151,7 @@ internal sealed class NoteSession : IDisposable
             ClearRecovery();
             return true;
         }
+        catch (InterruptedSaveException ex) { LoadInterruptedSave(ex); return false; }
         catch (FileConflictException)
         {
             _conflict = true;
@@ -396,7 +398,27 @@ internal sealed class NoteSession : IDisposable
             ClearRecovery();
             View.SetStatus("Сохранено");
         }
+        catch (InterruptedSaveException ex) { LoadInterruptedSave(ex); }
         catch (Exception ex) when (IsFileError(ex)) { MarkUnavailable(ex); }
+    }
+
+    private void LoadInterruptedSave(InterruptedSaveException error)
+    {
+        _paths.Log($"Interrupted write: {error.ArchivePath}");
+        if (!IsDirty)
+        {
+            var text = error.Pending.EditorText;
+            try { if (File.Exists(_paths.RecoveryFile(Record.Id))) text = File.ReadAllText(_paths.RecoveryFile(Record.Id)); }
+            catch (Exception ex) when (IsFileError(ex)) { _paths.Log(ex.ToString()); }
+            View.SetMarkdown(text);
+        }
+        _snapshot = error.Current;
+        IsDirty = true;
+        _missing = false;
+        _unavailable = error.Current is null;
+        _conflict = !_unavailable;
+        PreserveRecovery();
+        View.SetStatus(_unavailable ? "Текст восстановлен · действия…" : "Текст восстановлен · выберите версию", true);
     }
 
     private void MarkUnavailable(Exception error)
@@ -444,18 +466,26 @@ internal sealed class NoteSession : IDisposable
         _busy = true;
         try
         {
-            var renamed = _files.Rename(FilePath, title, _pathInUse);
-            Record.FilePath = Path.IsPathRooted(Record.FilePath) ? renamed.FilePath : Path.GetRelativePath(_paths.Root, renamed.FilePath);
-            Record.Title = title;
+            // Keep local text before moving a file or committing its new metadata.
+            AtomicFile.Write(_paths.RecoveryFile(Record.Id), Encoding.UTF8.GetBytes(View.Markdown));
+            var renamed = new NoteRenameService(_paths, _files).Rename(Record, title, () => MetadataChanged?.Invoke(), _pathInUse);
             if (renamed.IsMissing)
             {
                 _unavailable = _missing = IsDirty = true;
                 PreserveRecovery();
                 SetUnavailableStatus();
             }
+            else if (!IsDirty && !_conflict && !_unavailable) ClearRecovery();
             UpdateTitle();
-            MetadataChanged?.Invoke();
             return true;
+        }
+        catch (InterruptedSaveException ex) { LoadInterruptedSave(ex); UpdateTitle(); return false; }
+        catch (RenameRecoveryException ex)
+        {
+            _paths.Log(ex.ToString());
+            UpdateTitle();
+            if (interactive) MessageBox.Show(ex.Message, "StickyDesk — восстановление названия", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
         }
         catch (Exception ex) when (IsFileError(ex) || ex is ArgumentException or NotSupportedException)
         {

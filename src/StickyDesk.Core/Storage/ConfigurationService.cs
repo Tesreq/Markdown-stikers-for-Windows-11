@@ -57,4 +57,11 @@ public sealed class ConfigurationService(AppPaths paths)
     }
 
     public void Save(AppConfiguration configuration) => AtomicFile.Write(paths.Config, System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(configuration, Options)));
+
+    public void SaveCheckpoint(AppConfiguration configuration)
+    {
+        // Renamed files must remain reachable even if the main configuration is later corrupted.
+        Save(configuration);
+        Save(configuration);
+    }
 }

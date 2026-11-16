@@ -34,6 +34,9 @@ internal sealed class NoteManager : ApplicationContext
         _firstRun = !File.Exists(paths.Config) && !File.Exists(paths.Config + ".bak");
         _configurationService = new(paths);
         _configuration = _configurationService.Load();
+        var renameRecovery = new NoteRenameService(paths, _files);
+        renameRecovery.Recover(_configuration, () => _configurationService.SaveCheckpoint(_configuration));
+        _configurationService.Warnings.AddRange(renameRecovery.Warnings);
         _ = _dispatcher.Handle;
         _desktop = new(paths, () => Post(ScheduleReattach));
         _messages = new();
@@ -139,7 +142,11 @@ internal sealed class NoteManager : ApplicationContext
         session.View.ShellHandleLost += () => Post(ScheduleReattach);
         session.View.CloseRequested += () => Post(() => CloseNote(record.Id));
         session.RelinkRequested += () => Relink(session);
-        session.MetadataChanged += () => SaveConfiguration();
+        session.MetadataChanged += () =>
+        {
+            try { _configurationService.SaveCheckpoint(_configuration); _configurationDirty = false; }
+            catch { _configurationDirty = true; throw; }
+        };
         if (_desktop.Available) AttachAndShow(session);
         return session;
     }

@@ -9,7 +9,12 @@ public sealed class MarkdownFileService
 
     public MarkdownSnapshot Read(string path)
     {
-        var bytes = File.ReadAllBytes(path);
+        try { return Decode(ProtectedFileWrite.ReadRecovering(path)); }
+        catch (InterruptedFileWriteException ex) { throw DecodeInterruption(ex); }
+    }
+
+    private static MarkdownSnapshot Decode(byte[] bytes)
+    {
         var bom = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble);
         var text = Utf8.GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0));
         var line = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : text.Contains('\r') ? "\r" : "\n";
@@ -18,14 +23,15 @@ public sealed class MarkdownFileService
 
     public MarkdownSnapshot Save(string path, string editorText, MarkdownSnapshot expected)
     {
-        // Check content, not timestamps: equal timestamps and atomic editor saves are common.
-        AssertUnchanged(path, expected.Fingerprint);
         var text = MarkdownSnapshot.Normalize(editorText).Replace("\n", expected.NewLine, StringComparison.Ordinal);
         var content = Utf8.GetBytes(text);
         var bytes = expected.HasBom ? Encoding.UTF8.Preamble.ToArray().Concat(content).ToArray() : content;
-        // Recheck after preparing the write. No silent last-writer-wins policy.
-        AssertUnchanged(path, expected.Fingerprint);
-        AtomicFile.Write(path, bytes);
+        try
+        {
+            using var write = ProtectedFileWrite.Prepare(path, bytes, expected.Fingerprint);
+            write.Commit();
+        }
+        catch (InterruptedFileWriteException ex) { throw DecodeInterruption(ex); }
         return new(text, Fingerprint(bytes), expected.NewLine, expected.HasBom);
     }
 
@@ -43,6 +49,17 @@ public sealed class MarkdownFileService
 
     public (string FilePath, bool IsMissing) Rename(string path, string title, Func<string, bool>? pathInUse = null)
     {
+        var source = Path.GetFullPath(path);
+        var destination = RenameDestination(source, title, pathInUse);
+        try { _ = File.GetAttributes(source); }
+        catch (FileNotFoundException) { return (destination, true); }
+        catch (DirectoryNotFoundException) { return (destination, true); }
+        if (!string.Equals(source, destination, StringComparison.Ordinal)) File.Move(source, destination, false);
+        return (destination, false);
+    }
+
+    public string RenameDestination(string path, string title, Func<string, bool>? pathInUse = null)
+    {
         // Windows file-name rules also apply when Core is tested on another platform.
         if (string.IsNullOrWhiteSpace(title) || title != title.Trim() || title.EndsWith('.')
             || title.Any(character => character < 32 || "<>:\"/\\|?*".Contains(character)))
@@ -58,16 +75,15 @@ public sealed class MarkdownFileService
         var sameName = string.Equals(source, destination, StringComparison.OrdinalIgnoreCase);
         if (!sameName && (pathInUse?.Invoke(destination) == true || File.Exists(destination) || Directory.Exists(destination)))
             throw new IOException("Заметка с таким именем уже существует. Выберите другое название.");
-        try { _ = File.GetAttributes(source); }
-        catch (FileNotFoundException) { return (destination, true); }
-        catch (DirectoryNotFoundException) { return (destination, true); }
-        if (!string.Equals(source, destination, StringComparison.Ordinal)) File.Move(source, destination, false);
-        return (destination, false);
+        return destination;
     }
 
-    private static void AssertUnchanged(string path, string fingerprint)
+    private static InterruptedSaveException DecodeInterruption(InterruptedFileWriteException error)
     {
-        if (!File.Exists(path) || Fingerprint(File.ReadAllBytes(path)) != fingerprint) throw new FileConflictException(path);
+        MarkdownSnapshot? current;
+        try { current = Decode(error.Current); }
+        catch (DecoderFallbackException) { current = null; }
+        return new(Decode(error.Pending), current, error.ArchivePath);
     }
 
     private static string Fingerprint(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));

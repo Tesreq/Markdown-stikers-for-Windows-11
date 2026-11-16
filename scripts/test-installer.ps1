@@ -1,5 +1,11 @@
-﻿param([string]$SetupPath = 'StickyDesk-Setup-0.3.1-x64.exe')
+﻿param([string]$SetupPath)
 . "$PSScriptRoot\common.ps1"
+if (!$SetupPath) {
+    $project = Join-Path $ProjectRoot 'src\StickyDesk.App\StickyDesk.App.csproj'
+    $version = ([xml](Get-Content -Encoding UTF8 -Raw -LiteralPath $project)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+    if (!$version) { throw 'Версия приложения не найдена.' }
+    $SetupPath = "StickyDesk-Setup-$version-x64.exe"
+}
 $setup = Resolve-WorkspacePath $SetupPath
 $registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{1F17D3F9-1F43-40CA-94E5-7A9D8C613426}_is1'
 if (Test-Path -LiteralPath $registration) { throw 'StickyDesk уже установлен. Тест не будет изменять существующую установку.' }

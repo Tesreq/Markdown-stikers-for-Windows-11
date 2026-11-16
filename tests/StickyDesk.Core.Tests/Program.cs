@@ -1,6 +1,7 @@
 using System.Text;
 using StickyDesk.Core;
 
+if (args.FirstOrDefault() == "--storage-child") return StorageSafetyChecks.Child(args);
 var root = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "StickyDesk-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 var failures = 0;
@@ -208,5 +209,6 @@ Run("Malformed Markdown and incomplete delimiters remain readable", () =>
     const string source = "####### Не заголовок **незакончено [ссылка](";
     Check(MarkdownPreviewRenderer.Render(source).Text.TrimEnd('\n') == source, "Incomplete syntax lost text.");
 });
+StorageSafetyChecks.Run(root, Run, Check);
 Console.WriteLine($"{total - failures}/{total} passed. Test files: {root}");
 return failures == 0 ? 0 : 1;

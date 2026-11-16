@@ -7,6 +7,7 @@ public sealed class AppPaths
     public string Recovery => Path.Combine(Root, "recovery");
     public string Logs => Path.Combine(Root, "logs");
     public string Config => Path.Combine(Root, "config.json");
+    public string Operations => Path.Combine(Root, "operations");
 
     public AppPaths(string root)
     {
