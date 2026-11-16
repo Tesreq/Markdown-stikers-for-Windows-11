@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "settings": { "autosaveDelayMs": 700 },
+  "notes": [
+    {
+      "id": "c8a1838ffbb24ec1aba2ec857fbe3d25",
+      "title": "Пример заметки",
+      "filePath": "notes/example.md",
+      "isOwned": true,
+      "x": 120,
+      "y": 180,
+      "width": 280,
+      "height": 300,
+      "color": "#FFF2B3"
+    }
+  ]
+}

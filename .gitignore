@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.vs/
+.test-data/
+.local/
+artifacts/
+/StickyDesk-Setup-*.exe
+TestResults/
+*.log
+*.user
+*.suo
